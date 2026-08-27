@@ -7,7 +7,7 @@ import uuid
 
 from pathlib import Path
 
-DOCKER = "/Applications/Docker.app/Contents/Resources/bin/docker"
+DOCKER = shutil.which("docker") or "docker"
 
 class SandboxManager:
 
