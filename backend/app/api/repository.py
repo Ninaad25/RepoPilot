@@ -69,16 +69,6 @@ def analyze_repo(
         )
 
     finally:
-
-        # --------------------------------------------------
-        # Always remove temporary clone
-        # --------------------------------------------------
-
-        if workspace:
-
-            try:
-                manager.cleanup_workspace(
-                    workspace
-                )
-            except Exception:
-                pass
+            print("\n========================================")
+            print("ANALYSIS WORKSPACE:", workspace)
+            print("========================================\n")

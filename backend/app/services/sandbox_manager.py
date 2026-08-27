@@ -430,6 +430,28 @@ EXPOSE 80
             workspace / "repo"
         )
 
+        # ------------------------------------------
+        # Detect/generate Dockerfile
+        # ------------------------------------------
+
+        dockerfile = repo_path / "Dockerfile"
+
+        if dockerfile.exists():
+
+            # Use existing Dockerfile.
+            # Detect the exposed application port.
+            container_port = self.detect_dockerfile_port(
+                dockerfile
+            )
+
+        else:
+
+            dockerfile, container_port = (
+                self.generate_dockerfile(
+                    repo_path
+                )
+            )
+
         image_name = (
             f"repopilot-{sandbox_id}"
         )
@@ -454,7 +476,38 @@ EXPOSE 80
                 or "Docker build failed"
             )
 
-        return image_name
+        return image_name, container_port
+
+    # ==================================================
+    # DOCKERFILE PORT
+    # ==================================================
+
+    def detect_dockerfile_port(
+        self,
+        dockerfile: Path,
+    ) -> int:
+        """
+        Detect the EXPOSE port from an existing Dockerfile.
+        """
+
+        import re
+
+        text = dockerfile.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        matches = re.findall(
+            r"EXPOSE\s+(\d+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if matches:
+            return int(matches[-1])
+
+        # Safe default
+        return 3000
 
     # ==================================================
     # PORT

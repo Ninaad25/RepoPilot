@@ -37,8 +37,9 @@ function Login() {
       const { access_token, user } = response.data;
 
       localStorage.setItem("repopilot_token", access_token);
-
       localStorage.setItem("repopilot_user", JSON.stringify(user));
+
+      axios.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
 
       navigate("/");
     } catch (err) {

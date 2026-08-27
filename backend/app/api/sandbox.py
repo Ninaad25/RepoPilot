@@ -43,9 +43,7 @@ def launch_repository(
         # Create workspace
         # ------------------------------------------
 
-        sandbox_id, workspace = (
-            manager.create_workspace()
-        )
+        sandbox_id, workspace = manager.create_workspace()
 
         # ------------------------------------------
         # Clone repository
@@ -62,34 +60,28 @@ def launch_repository(
         # Find application
         # ------------------------------------------
 
-        app_path = manager.find_application(
-            repo_path
-        )
+        app_path = manager.find_application(repo_path)
 
         # ------------------------------------------
-        # Container port
-        # ------------------------------------------
-
-        container_port = 3000
-
-        # ------------------------------------------
-        # Dockerfile
+        # Dockerfile + container port
         # ------------------------------------------
 
         dockerfile = app_path / "Dockerfile"
 
-        if not dockerfile.exists():
-            dockerfile, container_port = (
-                manager.generate_dockerfile(
-                    app_path
-                )
+        if dockerfile.exists():
+            container_port = manager.detect_dockerfile_port(
+                dockerfile
+            )
+        else:
+            _, container_port = manager.generate_dockerfile(
+                app_path
             )
 
         # ------------------------------------------
         # Build Docker image
         # ------------------------------------------
 
-        image_name = manager.build_image(
+        image_name, container_port = manager.build_image(
             workspace,
             sandbox_id,
         )
@@ -104,9 +96,7 @@ def launch_repository(
             container_port,
         )
 
-        container_name = container[
-            "container_name"
-        ]
+        container_name = container["container_name"]
 
         # ------------------------------------------
         # Save sandbox to database
@@ -116,15 +106,11 @@ def launch_repository(
             sandbox_id=sandbox_id,
             user_id=current_user.id,
             repo_url=str(request.url),
-            container_id=container[
-                "container_id"
-            ],
+            container_id=container["container_id"],
             container_name=container_name,
             image_name=image_name,
             workspace=str(workspace),
-            host_port=container[
-                "host_port"
-            ],
+            host_port=container["host_port"],
             container_port=container_port,
             status="RUNNING",
         )
@@ -142,8 +128,7 @@ def launch_repository(
             "sandbox_id": sandbox.sandbox_id,
             "container_id": sandbox.container_id,
             "preview_url": (
-                f"http://localhost:"
-                f"{sandbox.host_port}"
+                f"http://localhost:{sandbox.host_port}"
             ),
             "status": sandbox.status,
         }
@@ -155,9 +140,7 @@ def launch_repository(
         # ------------------------------------------
 
         if container_name:
-            manager.stop_container(
-                container_name
-            )
+            manager.stop_container(container_name)
 
         # ------------------------------------------
         # Cleanup image + workspace
@@ -172,9 +155,7 @@ def launch_repository(
             )
 
         elif workspace:
-            manager.cleanup_workspace(
-                workspace
-            )
+            manager.cleanup_workspace(workspace)
 
         # ------------------------------------------
         # Rollback database
