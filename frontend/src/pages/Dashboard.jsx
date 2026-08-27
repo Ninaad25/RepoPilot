@@ -1,33 +1,51 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+
 import {
   Search,
   Code2,
   Package,
-  Cpu,
-  Server,
   Terminal,
   FileCode2,
   FolderTree,
   Loader2,
-  CheckCircle2,
   AlertCircle,
   Rocket,
-  XCircle,
   Box,
   ExternalLink,
+  Server,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 import "../App.css";
 
 const API_URL = "http://127.0.0.1:8000";
 
-axios.defaults.headers.common["Authorization"] =
-  `Bearer ${localStorage.getItem("repopilot_token")}`;
+/*
+|--------------------------------------------------------------------------
+| Axios authentication
+|--------------------------------------------------------------------------
+*/
 
-function App() {
+const token = localStorage.getItem("repopilot_token");
+
+if (token) {
+  axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Dashboard
+|--------------------------------------------------------------------------
+*/
+
+function Dashboard() {
+  const navigate = useNavigate();
+
   const [repoUrl, setRepoUrl] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [sandbox, setSandbox] = useState(null);
   const [error, setError] = useState("");
@@ -36,7 +54,11 @@ function App() {
   const [analysisError, setAnalysisError] = useState("");
   const [analysis, setAnalysis] = useState(null);
 
-  const navigate = useNavigate();
+  /*
+  |--------------------------------------------------------------------------
+  | Logout
+  |--------------------------------------------------------------------------
+  */
 
   const handleLogout = () => {
     localStorage.removeItem("repopilot_token");
@@ -46,6 +68,12 @@ function App() {
 
     navigate("/login");
   };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Analyze repository
+  |--------------------------------------------------------------------------
+  */
 
   const analyzeRepository = async () => {
     if (!repoUrl.trim()) {
@@ -58,17 +86,28 @@ function App() {
     setAnalysis(null);
 
     try {
-      const response = await axios.post(
-        "http://127.0.0.1:8000/api/repository/analyze",
-        {
-          url: repoUrl.trim(),
-        },
-      );
+      const response = await axios.post(`${API_URL}/api/repository/analyze`, {
+        url: repoUrl.trim(),
+      });
+
+      console.log("Repository analysis:", response.data);
 
       setAnalysis(response.data.analysis);
-    } catch (error) {
+    } catch (err) {
+      console.error("Repository analysis failed:", err);
+
+      if (err.response?.status === 401) {
+        localStorage.removeItem("repopilot_token");
+        localStorage.removeItem("repopilot_user");
+
+        delete axios.defaults.headers.common["Authorization"];
+
+        navigate("/login");
+        return;
+      }
+
       const message =
-        error?.response?.data?.detail || "Unable to analyze repository.";
+        err?.response?.data?.detail || "Unable to analyze repository.";
 
       setAnalysisError(message);
     } finally {
@@ -76,9 +115,11 @@ function App() {
     }
   };
 
-  // ==================================================
-  // POLL SANDBOX STATUS
-  // ==================================================
+  /*
+  |--------------------------------------------------------------------------
+  | Poll sandbox status
+  |--------------------------------------------------------------------------
+  */
 
   useEffect(() => {
     if (!sandbox?.sandbox_id) {
@@ -112,9 +153,11 @@ function App() {
     return () => clearInterval(interval);
   }, [sandbox?.sandbox_id]);
 
-  // ==================================================
-  // LAUNCH REPOSITORY
-  // ==================================================
+  /*
+  |--------------------------------------------------------------------------
+  | Launch repository
+  |--------------------------------------------------------------------------
+  */
 
   const launchRepository = async () => {
     if (!repoUrl.trim()) {
@@ -131,12 +174,24 @@ function App() {
         url: repoUrl.trim(),
       });
 
+      console.log("Sandbox launch response:", response.data);
+
       setSandbox(response.data);
     } catch (err) {
-      console.error(err);
+      console.error("Sandbox launch failed:", err);
+
+      if (err.response?.status === 401) {
+        localStorage.removeItem("repopilot_token");
+        localStorage.removeItem("repopilot_user");
+
+        delete axios.defaults.headers.common["Authorization"];
+
+        navigate("/login");
+        return;
+      }
 
       const message =
-        err.response?.data?.detail || "Unable to launch repository.";
+        err?.response?.data?.detail || "Unable to launch repository.";
 
       setError(message);
     } finally {
@@ -144,18 +199,23 @@ function App() {
     }
   };
 
-  // ==================================================
-  // FORM SUBMIT
-  // ==================================================
+  /*
+  |--------------------------------------------------------------------------
+  | Form submit
+  |--------------------------------------------------------------------------
+  */
 
   const handleSubmit = (event) => {
     event.preventDefault();
+
     launchRepository();
   };
 
-  // ==================================================
-  // STATUS
-  // ==================================================
+  /*
+  |--------------------------------------------------------------------------
+  | Sandbox status
+  |--------------------------------------------------------------------------
+  */
 
   const status = sandbox?.status;
 
@@ -164,15 +224,22 @@ function App() {
   const isStopped =
     status === "STOPPED" || status === "DEAD" || status === "NOT_FOUND";
 
+  /*
+  |--------------------------------------------------------------------------
+  | Render
+  |--------------------------------------------------------------------------
+  */
+
   return (
     <div className="app">
       {/* Background effects */}
+
       <div className="background-glow glow-one" />
       <div className="background-glow glow-two" />
 
-      {/* ================================================
+      {/* ==================================================
           NAVBAR
-      ================================================= */}
+      ================================================== */}
 
       <header className="navbar">
         <div className="brand">
@@ -188,19 +255,20 @@ function App() {
 
           {isStopped ? "Sandbox Offline" : "Sandbox Engine Online"}
         </div>
+
         <button type="button" className="logout-button" onClick={handleLogout}>
           Sign out
         </button>
       </header>
 
-      {/* ================================================
+      {/* ==================================================
           MAIN
-      ================================================= */}
+      ================================================== */}
 
       <main className="main">
-        {/* ==============================================
+        {/* ==================================================
             HERO
-        =============================================== */}
+        ================================================== */}
 
         <section className="hero">
           <div className="hero-badge">
@@ -217,11 +285,13 @@ function App() {
             builds, and launches it inside an isolated Docker sandbox.
           </p>
 
-          {/* Launch form */}
+          {/* ==================================================
+              LAUNCH FORM
+          ================================================== */}
 
-          <form className="launch-form" onSubmit={handleSubmit}>
-            <div className="input-wrapper">
-              <Terminal size={20} />
+          <form className="repo-form" onSubmit={handleSubmit}>
+            <div className="repo-input-wrapper">
+              <Search size={20} />
 
               <input
                 type="url"
@@ -241,338 +311,530 @@ function App() {
               ) : (
                 <>
                   <Rocket size={18} />
-                  Launch Demo
+                  Launch Sandbox
                 </>
               )}
             </button>
           </form>
 
-          {/* Error */}
+          {/* ==================================================
+              LAUNCH ERROR
+          ================================================== */}
 
           {error && (
-            <div className="error-message">
-              <XCircle size={18} />
+            <div className="launch-error">
+              <AlertCircle size={18} />
 
               <span>{error}</span>
             </div>
           )}
-        </section>
 
-        {/* ==============================================
-            LOADING
-        =============================================== */}
+          {/* ==================================================
+              SANDBOX STATUS
+          ================================================== */}
 
-        {loading && (
-          <section className="progress-card">
-            <div className="progress-header">
-              <div>
-                <p className="eyebrow">SANDBOX DEPLOYMENT</p>
-
-                <h2>Preparing your repository</h2>
-              </div>
-
-              <Loader2 size={24} className="spin" />
-            </div>
-
-            <div className="progress-list">
-              <ProgressItem
-                icon={<Terminal size={17} />}
-                text="Cloning repository"
-                active
-              />
-
-              <ProgressItem
-                icon={<Box size={17} />}
-                text="Building Docker sandbox"
-                active
-              />
-
-              <ProgressItem
-                icon={<Server size={17} />}
-                text="Starting preview server"
-                active
-              />
-            </div>
-          </section>
-        )}
-
-        {/* ==============================================
-            RESULT
-        =============================================== */}
-
-        {sandbox && !loading && (
-          <section className="result-card">
-            {/* Success banner */}
-
-            <div className={`success-banner ${isStopped ? "stopped" : ""}`}>
-              {isStopped ? <XCircle size={21} /> : <CheckCircle2 size={21} />}
-
-              <div>
-                <strong>
-                  {isRunning ? "Sandbox is live" : "Sandbox is offline"}
-                </strong>
-
-                <span>
-                  {isRunning
-                    ? "Your repository is running successfully."
-                    : "The Docker container is no longer running."}
-                </span>
-              </div>
-            </div>
-
-            {/* Information */}
-
-            <div className="result-grid">
-              <InfoCard
-                label="Sandbox"
-                value={sandbox.sandbox_id || "Unknown"}
-              />
-
-              <InfoCard
-                label="Container"
-                value={sandbox.container_id || "Unknown"}
-              />
-
-              <InfoCard
-                label="Status"
-                value={sandbox.status || "UNKNOWN"}
-                status={isRunning}
-              />
-            </div>
-
-            <div className="analysis-panel">
-              <div className="analysis-header">
+          {sandbox && (
+            <div className="sandbox-status">
+              <div className="sandbox-status-header">
                 <div>
-                  <div className="analysis-eyebrow">
-                    REPOSITORY INTELLIGENCE
-                  </div>
+                  <div className="analysis-eyebrow">SANDBOX</div>
 
-                  <h2>Repository Analysis</h2>
-
-                  <p>
-                    Inspect the repository before launching its sandbox
-                    environment.
-                  </p>
+                  <h3>Sandbox Environment</h3>
                 </div>
 
-                <button
-                  className="analysis-button"
-                  onClick={analyzeRepository}
-                  disabled={analysisLoading}
+                <div
+                  className={`sandbox-state ${
+                    isRunning ? "running" : isStopped ? "stopped" : ""
+                  }`}
                 >
-                  {analysisLoading ? (
+                  {isRunning ? (
                     <>
-                      <Loader2 size={18} className="spin" />
-                      Analyzing...
+                      <CheckCircle2 size={16} />
+                      Running
+                    </>
+                  ) : isStopped ? (
+                    <>
+                      <XCircle size={16} />
+                      Stopped
                     </>
                   ) : (
                     <>
-                      <Search size={18} />
-                      Analyze Repository
+                      <Loader2 size={16} className="spin" />
+                      {status || "Starting"}
                     </>
                   )}
-                </button>
+                </div>
               </div>
 
-              {analysisError && (
-                <div className="analysis-error">
-                  <AlertCircle size={18} />
+              <div className="analysis-grid">
+                <div>
+                  <span>Sandbox ID</span>
 
-                  <span>{analysisError}</span>
+                  <strong>{sandbox.sandbox_id || "Unknown"}</strong>
                 </div>
-              )}
 
-              {analysisLoading && (
-                <div className="analysis-loading">
-                  <Loader2 size={32} className="spin" />
+                <div>
+                  <span>Container</span>
 
-                  <div>
-                    <strong>Analyzing repository</strong>
-
-                    <p>
-                      Detecting framework, runtime, dependencies and project
-                      structure...
-                    </p>
-                  </div>
+                  <strong>{sandbox.container_name || "Unknown"}</strong>
                 </div>
-              )}
 
-              {analysis && (
-                <div className="analysis-results">
-                  {/* PROJECT */}
+                <div>
+                  <span>Port</span>
 
-                  <div className="analysis-card">
-                    <div className="analysis-card-title">
-                      <Code2 size={20} />
-
-                      <span>Project</span>
-                    </div>
-
-                    <div className="analysis-grid">
-                      <div>
-                        <span>Framework</span>
-
-                        <strong>
-                          {analysis.project?.framework || "Unknown"}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span>Language</span>
-
-                        <strong>
-                          {analysis.project?.language || "Unknown"}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* RUNTIME */}
-
-                  <div className="analysis-card">
-                    <div className="analysis-card-title">
-                      <Cpu size={20} />
-
-                      <span>Runtime</span>
-                    </div>
-
-                    <div className="analysis-grid">
-                      <div>
-                        <span>Runtime</span>
-
-                        <strong>
-                          {analysis.runtime?.runtime || "Unknown"}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span>Port</span>
-
-                        <strong>
-                          {analysis.runtime?.port ||
-                            analysis.runtime_detection?.port ||
-                            "Unknown"}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span>Package Manager</span>
-
-                        <strong>{analysis.package_manager || "Unknown"}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* COMMANDS */}
-
-                  <div className="analysis-card">
-                    <div className="analysis-card-title">
-                      <Terminal size={20} />
-
-                      <span>Commands</span>
-                    </div>
-
-                    <div className="command-list">
-                      <div>
-                        <span>Build</span>
-
-                        <code>
-                          {analysis.runtime?.build_command || "Not detected"}
-                        </code>
-                      </div>
-
-                      <div>
-                        <span>Start</span>
-
-                        <code>
-                          {analysis.runtime?.start_command || "Not detected"}
-                        </code>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* DEPENDENCIES */}
-
-                  <div className="analysis-card">
-                    <div className="analysis-card-title">
-                      <Package size={20} />
-
-                      <span>Dependencies</span>
-                    </div>
-
-                    {analysis.dependencies?.length ? (
-                      <div className="dependency-list">
-                        {analysis.dependencies
-                          .slice(0, 20)
-                          .map((dependency) => (
-                            <div
-                              className="dependency-item"
-                              key={`${dependency.type}-${dependency.name}`}
-                            >
-                              <span>{dependency.name}</span>
-
-                              <code>{dependency.version}</code>
-                            </div>
-                          ))}
-                      </div>
-                    ) : (
-                      <div className="empty-analysis">
-                        No package dependencies detected.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* FILE STRUCTURE */}
-
-                  <div className="analysis-card">
-                    <div className="analysis-card-title">
-                      <FolderTree size={20} />
-
-                      <span>Project Structure</span>
-                    </div>
-
-                    <div className="structure-list">
-                      {analysis.structure?.length ? (
-                        analysis.structure.map((item) => (
-                          <div className="structure-item" key={item}>
-                            <FileCode2 size={16} />
-                            {item}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="empty-analysis">
-                          No directories detected.
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <strong>{sandbox.host_port || "Unknown"}</strong>
                 </div>
-              )}
+              </div>
+            </div>
+          )}
+
+          {/* ==================================================
+              REPOSITORY ANALYSIS
+          ================================================== */}
+
+          <div className="analysis-panel">
+            <div className="analysis-header">
+              <div>
+                <div className="analysis-eyebrow">REPOSITORY INTELLIGENCE</div>
+
+                <h2>Repository Analysis</h2>
+
+                <p>
+                  Inspect the repository before launching its sandbox
+                  environment.
+                </p>
+              </div>
+
+              <button
+                className="analysis-button"
+                onClick={analyzeRepository}
+                disabled={analysisLoading}
+              >
+                {analysisLoading ? (
+                  <>
+                    <Loader2 size={18} className="spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <Search size={18} />
+                    Analyze Repository
+                  </>
+                )}
+              </button>
             </div>
 
-            {/* Preview */}
+            {/* ==================================================
+                ANALYSIS ERROR
+            ================================================== */}
 
-            {sandbox.preview_url && (
-              <>
-                <a
-                  href={sandbox.preview_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="preview-button"
-                >
-                  <ExternalLink size={18} />
-                  Open Live Preview
-                </a>
+            {analysisError && (
+              <div className="analysis-error">
+                <AlertCircle size={18} />
 
-                <p className="preview-url">{sandbox.preview_url}</p>
-              </>
+                <span>{analysisError}</span>
+              </div>
             )}
-          </section>
-        )}
 
-        {/* ==============================================
+            {/* ==================================================
+                ANALYSIS LOADING
+            ================================================== */}
+
+            {analysisLoading && (
+              <div className="analysis-loading">
+                <Loader2 size={32} className="spin" />
+
+                <div>
+                  <strong>Analyzing repository</strong>
+
+                  <p>
+                    Detecting framework, runtime, dependencies and project
+                    structure...
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ==================================================
+                ANALYSIS RESULTS
+            ================================================== */}
+
+            {analysis && (
+              <div className="analysis-results">
+                {/* ==================================================
+                    PROJECT
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Code2 size={20} />
+
+                    <span>Project</span>
+                  </div>
+
+                  <div className="analysis-grid">
+                    <div>
+                      <span>Framework</span>
+
+                      <strong>{analysis.framework || "Unknown"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Language</span>
+
+                      <strong>{analysis.language || "Unknown"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Runtime</span>
+
+                      <strong>{analysis.runtime || "Unknown"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Package Manager</span>
+
+                      <strong>{analysis.package_manager || "Unknown"}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ==================================================
+                    PORTS
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Server size={20} />
+
+                    <span>Ports</span>
+                  </div>
+
+                  {analysis.ports?.length ? (
+                    <div className="dependency-list">
+                      {analysis.ports.map((port) => (
+                        <div className="dependency-item" key={`port-${port}`}>
+                          <span>Application Port</span>
+
+                          <code>{port}</code>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-analysis">No ports detected.</div>
+                  )}
+                </div>
+
+                {/* ==================================================
+                    COMMANDS
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Terminal size={20} />
+
+                    <span>Commands</span>
+                  </div>
+
+                  <div className="command-list">
+                    <div>
+                      <span>Build</span>
+
+                      <code>{analysis.build_command || "Not detected"}</code>
+                    </div>
+
+                    <div>
+                      <span>Start</span>
+
+                      <code>{analysis.start_command || "Not detected"}</code>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ==================================================
+                    APPLICATIONS
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Box size={20} />
+
+                    <span>Applications</span>
+                  </div>
+
+                  {analysis.applications?.length ? (
+                    <div className="application-list">
+                      {analysis.applications.map((application, index) => (
+                        <div
+                          className="application-item"
+                          key={`application-${
+                            application.path || application.name || index
+                          }`}
+                        >
+                          <div className="application-header">
+                            <strong>{application.name || "Application"}</strong>
+
+                            <span>{application.type || "Unknown"}</span>
+                          </div>
+
+                          <div className="analysis-grid">
+                            <div>
+                              <span>Framework</span>
+
+                              <strong>
+                                {application.framework || "Unknown"}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>Runtime</span>
+
+                              <strong>
+                                {application.runtime || "Unknown"}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>Port</span>
+
+                              <strong>{application.port || "Unknown"}</strong>
+                            </div>
+
+                            <div>
+                              <span>Path</span>
+
+                              <strong>{application.path || "."}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-analysis">
+                      No applications detected.
+                    </div>
+                  )}
+                </div>
+
+                {/* ==================================================
+                    DEPENDENCIES
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Package size={20} />
+
+                    <span>Dependencies</span>
+                  </div>
+
+                  {analysis.dependencies?.length ? (
+                    <div className="dependency-list">
+                      {analysis.dependencies.slice(0, 30).map((dependency) => (
+                        <div
+                          className="dependency-item"
+                          key={`dependency-${dependency}`}
+                        >
+                          <span>{dependency}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-analysis">
+                      No package dependencies detected.
+                    </div>
+                  )}
+
+                  {analysis.dependencies?.length > 30 && (
+                    <div className="analysis-note">
+                      Showing first 30 of {analysis.dependencies.length}{" "}
+                      dependencies.
+                    </div>
+                  )}
+                </div>
+
+                {/* ==================================================
+                    PACKAGE FILES
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Package size={20} />
+
+                    <span>Packages</span>
+                  </div>
+
+                  {analysis.packages?.length ? (
+                    <div className="application-list">
+                      {analysis.packages.map((pkg, index) => (
+                        <div
+                          className="application-item"
+                          key={`package-${pkg.path || index}`}
+                        >
+                          <div className="application-header">
+                            <strong>{pkg.name || "package.json"}</strong>
+
+                            <span>{pkg.path}</span>
+                          </div>
+
+                          <div className="analysis-grid">
+                            <div>
+                              <span>Version</span>
+
+                              <strong>{pkg.version || "Unknown"}</strong>
+                            </div>
+
+                            <div>
+                              <span>Dependencies</span>
+
+                              <strong>
+                                {Object.keys(pkg.dependencies || {}).length}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>Scripts</span>
+
+                              <strong>
+                                {Object.keys(pkg.scripts || {}).length}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-analysis">
+                      No package files detected.
+                    </div>
+                  )}
+                </div>
+
+                {/* ==================================================
+                    FILE STRUCTURE
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <FolderTree size={20} />
+
+                    <span>Project Structure</span>
+                  </div>
+
+                  {analysis.structure?.directories?.length ? (
+                    <div className="structure-list">
+                      {analysis.structure.directories
+                        .slice(0, 50)
+                        .map((item) => (
+                          <div
+                            className="structure-item"
+                            key={`directory-${item}`}
+                          >
+                            <FolderTree size={16} />
+
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="empty-analysis">
+                      No directories detected.
+                    </div>
+                  )}
+                </div>
+
+                {/* ==================================================
+                    ENTRY POINTS
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <FileCode2 size={20} />
+
+                    <span>Entry Points</span>
+                  </div>
+
+                  {analysis.entry_points?.length ? (
+                    <div className="structure-list">
+                      {analysis.entry_points.map((entry) => (
+                        <div className="structure-item" key={`entry-${entry}`}>
+                          <FileCode2 size={16} />
+
+                          <span>{entry}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-analysis">
+                      No entry points detected.
+                    </div>
+                  )}
+                </div>
+
+                {/* ==================================================
+                    FILE STATISTICS
+                ================================================== */}
+
+                <div className="analysis-card">
+                  <div className="analysis-card-title">
+                    <Code2 size={20} />
+
+                    <span>Repository Statistics</span>
+                  </div>
+
+                  <div className="analysis-grid">
+                    <div>
+                      <span>Total Files</span>
+
+                      <strong>{analysis.files?.total ?? 0}</strong>
+                    </div>
+
+                    <div>
+                      <span>Directories</span>
+
+                      <strong>{analysis.files?.directories ?? 0}</strong>
+                    </div>
+
+                    <div>
+                      <span>Dependencies</span>
+
+                      <strong>{analysis.dependencies?.length ?? 0}</strong>
+                    </div>
+
+                    <div>
+                      <span>Applications</span>
+
+                      <strong>{analysis.applications?.length ?? 0}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ==================================================
+              PREVIEW
+          ================================================== */}
+
+          {sandbox?.preview_url && (
+            <div className="preview-section">
+              <a
+                href={sandbox.preview_url}
+                target="_blank"
+                rel="noreferrer"
+                className="preview-button"
+              >
+                <ExternalLink size={18} />
+                Open Live Preview
+              </a>
+
+              <p className="preview-url">{sandbox.preview_url}</p>
+            </div>
+          )}
+        </section>
+
+        {/* ==================================================
             FEATURES
-        =============================================== */}
+        ================================================== */}
 
         <section className="features">
           <Feature
@@ -595,9 +857,9 @@ function App() {
         </section>
       </main>
 
-      {/* ================================================
+      {/* ==================================================
           FOOTER
-      ================================================= */}
+      ================================================== */}
 
       <footer>
         <span>RepoPilot</span>
@@ -610,47 +872,15 @@ function App() {
   );
 }
 
-// ======================================================
-// PROGRESS ITEM
-// ======================================================
-
-function ProgressItem({ icon, text, active }) {
-  return (
-    <div className="progress-item">
-      <div className={`progress-icon ${active ? "active" : ""}`}>
-        {active ? <Loader2 size={16} className="spin" /> : icon}
-      </div>
-
-      <span>{text}</span>
-    </div>
-  );
-}
-
-// ======================================================
-// INFO CARD
-// ======================================================
-
-function InfoCard({ label, value, status }) {
-  return (
-    <div className="info-card">
-      <span>{label}</span>
-
-      <strong className={status ? "live" : ""}>
-        {status && <span className="mini-dot" />}
-
-        {value}
-      </strong>
-    </div>
-  );
-}
-
-// ======================================================
-// FEATURE
-// ======================================================
+/*
+|--------------------------------------------------------------------------
+| Feature component
+|--------------------------------------------------------------------------
+*/
 
 function Feature({ icon, title, description }) {
   return (
-    <div className="feature">
+    <div className="feature-card">
       <div className="feature-icon">{icon}</div>
 
       <h3>{title}</h3>
@@ -660,4 +890,4 @@ function Feature({ icon, title, description }) {
   );
 }
 
-export default App;
+export default Dashboard;
