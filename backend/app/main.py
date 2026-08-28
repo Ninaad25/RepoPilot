@@ -1,4 +1,3 @@
-
 import os
 
 from fastapi import FastAPI
@@ -7,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.auth import router as auth_router
 from app.api.repository import router as repository_router
 from app.api.sandbox import router as sandbox_router
+
 from app.database import Base, engine
 from app.models import Sandbox, User
 
@@ -15,9 +15,7 @@ from app.models import Sandbox, User
 # DATABASE
 # ==================================================
 
-Base.metadata.create_all(
-    bind=engine
-)
+Base.metadata.create_all(bind=engine)
 
 
 # ==================================================
@@ -30,12 +28,18 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+# ==================================================
+# HEALTH
+# ==================================================
+
 @app.get("/health")
 def health():
     return {
-        "status": "ok",
-        "service": "RepoPilot API"
+        "status": "healthy",
+        "service": "RepoPilot API",
     }
+
 
 # ==================================================
 # CORS
@@ -63,17 +67,9 @@ app.add_middleware(
 # ROUTES
 # ==================================================
 
-app.include_router(
-    auth_router
-)
-
-app.include_router(
-    repository_router
-)
-
-app.include_router(
-    sandbox_router
-)
+app.include_router(auth_router)
+app.include_router(repository_router)
+app.include_router(sandbox_router)
 
 
 # ==================================================
@@ -87,16 +83,3 @@ def root():
         "status": "running",
         "version": "0.1.0",
     }
-
-
-# ==================================================
-# HEALTH
-# ==================================================
-
-@app.get("/api/health")
-def health():
-    return {
-        "status": "healthy",
-        "service": "RepoPilot API",
-    }
-
