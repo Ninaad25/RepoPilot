@@ -136,26 +136,21 @@ def launch_repository(
     except Exception as error:
 
         # ------------------------------------------
-        # Cleanup container
+        # Cleanup everything created by this launch
         # ------------------------------------------
 
-        if container_name:
-            manager.stop_container(container_name)
-
-        # ------------------------------------------
-        # Cleanup image + workspace
-        # ------------------------------------------
-
-        if image_name:
+        if (
+            sandbox_id
+            or container_name
+            or workspace
+            or image_name
+        ):
             manager.delete_sandbox(
                 sandbox_id=sandbox_id or "",
                 container_name=container_name or "",
                 workspace=workspace,
                 image_name=image_name,
             )
-
-        elif workspace:
-            manager.cleanup_workspace(workspace)
 
         # ------------------------------------------
         # Rollback database
@@ -224,9 +219,9 @@ def sandbox_status(
     sandbox = (
         db.query(Sandbox)
         .filter(
-    Sandbox.sandbox_id == sandbox_id,
-    Sandbox.user_id == current_user.id,
-)
+            Sandbox.sandbox_id == sandbox_id,
+            Sandbox.user_id == current_user.id,
+        )
         .first()
     )
 
@@ -240,7 +235,44 @@ def sandbox_status(
         sandbox.container_name
     )
 
+    # ------------------------------------------
+    # Automatic cleanup
+    # ------------------------------------------
+
+    if status in {"STOPPED", "DEAD", "NOT_FOUND"}:
+
+        # Save status before cleanup
+        sandbox.status = status
+        db.commit()
+
+        # Remove Docker container, image and workspace
+        manager.delete_sandbox(
+            sandbox_id=sandbox.sandbox_id,
+            container_name=sandbox.container_name,
+            workspace=(
+                Path(sandbox.workspace)
+                if sandbox.workspace
+                else None
+            ),
+            image_name=sandbox.image_name,
+        )
+
+        # Remove database record
+        db.delete(sandbox)
+        db.commit()
+
+        return {
+            "success": True,
+            "sandbox_id": sandbox_id,
+            "status": status,
+            "cleaned_up": True,
+            "message": "Sandbox stopped and cleaned up",
+        }
+
+    # ------------------------------------------
     # Keep database status synchronized
+    # ------------------------------------------
+
     if sandbox.status != status:
         sandbox.status = status
         db.commit()
@@ -252,6 +284,7 @@ def sandbox_status(
         "status": status,
         "container_name": sandbox.container_name,
         "container_id": sandbox.container_id,
+        "cleaned_up": False,
     }
 
     if sandbox.host_port:
@@ -261,7 +294,7 @@ def sandbox_status(
         )
 
     return response
-
+    
 # ==================================================
 # DELETE SANDBOX
 # ==================================================

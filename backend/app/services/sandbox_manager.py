@@ -636,8 +636,15 @@ EXPOSE 80
         self,
         container_name: str,
     ):
+        """
+        Force-stop and remove a sandbox container.
+        Safe to call even if the container no longer exists.
+        """
 
-        subprocess.run(
+        if not container_name:
+            return
+
+        result = subprocess.run(
             [
                 DOCKER,
                 "rm",
@@ -647,6 +654,15 @@ EXPOSE 80
             capture_output=True,
             text=True,
         )
+
+        # Ignore "container not found" errors.
+        if result.returncode != 0:
+            if "No such container" not in result.stderr:
+                print(
+                    f"[SandboxManager] Failed to remove "
+                    f"container {container_name}: "
+                    f"{result.stderr.strip()}"
+                )
 
     # ==================================================
     # CLEANUP
@@ -662,7 +678,7 @@ EXPOSE 80
             ignore_errors=True,
         )
 
-        # ==================================================
+    # ==================================================
     # DELETE SANDBOX
     # ==================================================
 
@@ -673,12 +689,28 @@ EXPOSE 80
         workspace: Path | None = None,
         image_name: str | None = None,
     ):
-        # Stop and remove container
-        self.stop_container(container_name)
+        """
+        Completely remove a sandbox:
+        - Docker container
+        - Docker image
+        - temporary workspace
+        """
 
-        # Remove Docker image
+        # ------------------------------------------
+        # Remove container
+        # ------------------------------------------
+
+        if container_name:
+            self.stop_container(
+                container_name
+            )
+
+        # ------------------------------------------
+        # Remove image
+        # ------------------------------------------
+
         if image_name:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     DOCKER,
                     "rmi",
@@ -689,6 +721,19 @@ EXPOSE 80
                 text=True,
             )
 
+            if result.returncode != 0:
+                if "No such image" not in result.stderr:
+                    print(
+                        f"[SandboxManager] Failed to remove "
+                        f"image {image_name}: "
+                        f"{result.stderr.strip()}"
+                    )
+
+        # ------------------------------------------
         # Remove workspace
+        # ------------------------------------------
+
         if workspace:
-            self.cleanup_workspace(workspace)
+            self.cleanup_workspace(
+                workspace
+            )
