@@ -27,7 +27,7 @@ app = FastAPI(
     description="AI-powered GitHub repository demo platform",
     version="0.1.0",
 )
-
+print("🚀 RepoPilot API VERSION: HEALTH-FIX-1")
 
 # ==================================================
 # HEALTH
