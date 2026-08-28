@@ -1,14 +1,16 @@
+
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy.orm import Session
 
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.sandbox import Sandbox
 from app.models.user import User
 from app.services.sandbox_manager import SandboxManager
-from app.api.auth import get_current_user
 
 
 router = APIRouter(
@@ -21,6 +23,46 @@ manager = SandboxManager()
 
 class LaunchRequest(BaseModel):
     url: HttpUrl
+
+
+# ==================================================
+# RUNNER URL
+# ==================================================
+
+SANDBOX_RUNNER_URL = os.getenv(
+    "SANDBOX_RUNNER_URL",
+    "",
+).rstrip("/")
+
+
+def get_preview_url(
+    sandbox_id: str,
+    runner_preview_url: str | None = None,
+) -> str | None:
+    """
+    Return the externally accessible preview URL.
+
+    Priority:
+    1. URL returned by the remote runner
+    2. SANDBOX_RUNNER_URL + /preview/<sandbox_id>/
+    3. None
+    """
+
+    # If the runner explicitly returned a preview URL,
+    # use that first.
+    if runner_preview_url:
+        return runner_preview_url.rstrip("/")
+
+    # Otherwise construct the URL from the configured
+    # remote sandbox runner.
+    if SANDBOX_RUNNER_URL:
+        return (
+            f"{SANDBOX_RUNNER_URL}"
+            f"/preview/"
+            f"{sandbox_id}/"
+        )
+
+    return None
 
 
 # ==================================================
@@ -60,7 +102,9 @@ def launch_repository(
         # Find application
         # ------------------------------------------
 
-        app_path = manager.find_application(repo_path)
+        app_path = manager.find_application(
+            repo_path
+        )
 
         # ------------------------------------------
         # Dockerfile + container port
@@ -69,21 +113,27 @@ def launch_repository(
         dockerfile = app_path / "Dockerfile"
 
         if dockerfile.exists():
-            container_port = manager.detect_dockerfile_port(
-                dockerfile
+            container_port = (
+                manager.detect_dockerfile_port(
+                    dockerfile
+                )
             )
         else:
-            _, container_port = manager.generate_dockerfile(
-                app_path
+            _, container_port = (
+                manager.generate_dockerfile(
+                    app_path
+                )
             )
 
         # ------------------------------------------
         # Build Docker image
         # ------------------------------------------
 
-        image_name, container_port = manager.build_image(
-            workspace,
-            sandbox_id,
+        image_name, container_port = (
+            manager.build_image(
+                workspace,
+                sandbox_id,
+            )
         )
 
         # ------------------------------------------
@@ -96,21 +146,36 @@ def launch_repository(
             container_port,
         )
 
-        container_name = container["container_name"]
+        container_name = container[
+            "container_name"
+        ]
 
         # ------------------------------------------
-        # Save sandbox to database
+        # Runner preview URL
+        # ------------------------------------------
+
+        preview_url = get_preview_url(
+            sandbox_id,
+            container.get("preview_url"),
+        )
+
+        # ------------------------------------------
+        # Save sandbox
         # ------------------------------------------
 
         sandbox = Sandbox(
             sandbox_id=sandbox_id,
             user_id=current_user.id,
             repo_url=str(request.url),
-            container_id=container["container_id"],
+            container_id=container[
+                "container_id"
+            ],
             container_name=container_name,
             image_name=image_name,
             workspace=str(workspace),
-            host_port=container["host_port"],
+            host_port=container.get(
+                "host_port"
+            ),
             container_port=container_port,
             status="RUNNING",
         )
@@ -127,16 +192,14 @@ def launch_repository(
             "success": True,
             "sandbox_id": sandbox.sandbox_id,
             "container_id": sandbox.container_id,
-            "preview_url": (
-                f"http://localhost:{sandbox.host_port}"
-            ),
+            "preview_url": preview_url,
             "status": sandbox.status,
         }
 
     except Exception as error:
 
         # ------------------------------------------
-        # Cleanup everything created by this launch
+        # Cleanup
         # ------------------------------------------
 
         if (
@@ -147,13 +210,15 @@ def launch_repository(
         ):
             manager.delete_sandbox(
                 sandbox_id=sandbox_id or "",
-                container_name=container_name or "",
+                container_name=(
+                    container_name or ""
+                ),
                 workspace=workspace,
                 image_name=image_name,
             )
 
         # ------------------------------------------
-        # Rollback database
+        # Database rollback
         # ------------------------------------------
 
         db.rollback()
@@ -187,6 +252,10 @@ def get_sandbox(
             detail="Sandbox not found",
         )
 
+    preview_url = get_preview_url(
+        sandbox.sandbox_id
+    )
+
     return {
         "success": True,
         "sandbox": {
@@ -200,11 +269,9 @@ def get_sandbox(
             "status": sandbox.status,
             "created_at": sandbox.created_at,
         },
-        "preview_url": (
-            f"http://localhost:"
-            f"{sandbox.host_port}"
-        ),
+        "preview_url": preview_url,
     }
+
 
 # ==================================================
 # SANDBOX STATUS
@@ -239,16 +306,20 @@ def sandbox_status(
     # Automatic cleanup
     # ------------------------------------------
 
-    if status in {"STOPPED", "DEAD", "NOT_FOUND"}:
+    if status in {
+        "STOPPED",
+        "DEAD",
+        "NOT_FOUND",
+    }:
 
-        # Save status before cleanup
         sandbox.status = status
         db.commit()
 
-        # Remove Docker container, image and workspace
         manager.delete_sandbox(
             sandbox_id=sandbox.sandbox_id,
-            container_name=sandbox.container_name,
+            container_name=(
+                sandbox.container_name
+            ),
             workspace=(
                 Path(sandbox.workspace)
                 if sandbox.workspace
@@ -257,7 +328,6 @@ def sandbox_status(
             image_name=sandbox.image_name,
         )
 
-        # Remove database record
         db.delete(sandbox)
         db.commit()
 
@@ -266,35 +336,56 @@ def sandbox_status(
             "sandbox_id": sandbox_id,
             "status": status,
             "cleaned_up": True,
-            "message": "Sandbox stopped and cleaned up",
+            "message": (
+                "Sandbox stopped and cleaned up"
+            ),
         }
 
     # ------------------------------------------
-    # Keep database status synchronized
+    # Synchronize status
     # ------------------------------------------
 
     if sandbox.status != status:
+
         sandbox.status = status
+
         db.commit()
         db.refresh(sandbox)
+
+    # ------------------------------------------
+    # Build response
+    # ------------------------------------------
 
     response = {
         "success": True,
         "sandbox_id": sandbox.sandbox_id,
         "status": status,
-        "container_name": sandbox.container_name,
+        "container_name": (
+            sandbox.container_name
+        ),
         "container_id": sandbox.container_id,
         "cleaned_up": False,
     }
 
-    if sandbox.host_port:
+    # ------------------------------------------
+    # Production preview URL
+    # ------------------------------------------
+
+    runner_url = os.getenv(
+        "SANDBOX_RUNNER_URL",
+        "",
+    ).rstrip("/")
+
+    if runner_url:
         response["preview_url"] = (
-            f"http://localhost:"
-            f"{sandbox.host_port}"
+            f"{runner_url}"
+            f"/preview/"
+            f"{sandbox.sandbox_id}/"
         )
 
     return response
-    
+
+
 # ==================================================
 # DELETE SANDBOX
 # ==================================================
@@ -308,9 +399,9 @@ def delete_sandbox(
     sandbox = (
         db.query(Sandbox)
         .filter(
-    Sandbox.sandbox_id == sandbox_id,
-    Sandbox.user_id == current_user.id,
-)
+            Sandbox.sandbox_id == sandbox_id,
+            Sandbox.user_id == current_user.id,
+        )
         .first()
     )
 
@@ -320,42 +411,25 @@ def delete_sandbox(
             detail="Sandbox not found",
         )
 
-    try:
-        # ------------------------------------------
-        # Stop container
-        # Remove image
-        # Remove workspace
-        # ------------------------------------------
+    manager.delete_sandbox(
+        sandbox_id=sandbox.sandbox_id,
+        container_name=(
+            sandbox.container_name
+            or ""
+        ),
+        workspace=(
+            Path(sandbox.workspace)
+            if sandbox.workspace
+            else None
+        ),
+        image_name=sandbox.image_name,
+    )
 
-        manager.delete_sandbox(
-            sandbox_id=sandbox.sandbox_id,
-            container_name=sandbox.container_name,
-            workspace=(
-                Path(sandbox.workspace)
-                if sandbox.workspace
-                else None
-            ),
-            image_name=sandbox.image_name,
-        )
+    db.delete(sandbox)
+    db.commit()
 
-        # ------------------------------------------
-        # Remove database record
-        # ------------------------------------------
-
-        db.delete(sandbox)
-        db.commit()
-
-        return {
-            "success": True,
-            "sandbox_id": sandbox_id,
-            "message": "Sandbox deleted successfully",
-        }
-
-    except Exception as error:
-
-        db.rollback()
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+    return {
+        "success": True,
+        "sandbox_id": sandbox_id,
+        "message": "Sandbox deleted",
+    }
