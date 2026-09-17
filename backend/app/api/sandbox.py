@@ -1,6 +1,4 @@
-
 import os
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, HttpUrl
@@ -10,7 +8,7 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.sandbox import Sandbox
 from app.models.user import User
-from app.services.sandbox_manager import SandboxManager
+from app.services.sandbox_client import SandboxRunnerClient
 
 
 router = APIRouter(
@@ -18,21 +16,17 @@ router = APIRouter(
     tags=["Sandbox"],
 )
 
-manager = SandboxManager()
-
 
 class LaunchRequest(BaseModel):
     url: HttpUrl
 
 
 # ==================================================
-# RUNNER URL
+# RUNNER
 # ==================================================
 
-SANDBOX_RUNNER_URL = os.getenv(
-    "SANDBOX_RUNNER_URL",
-    "",
-).rstrip("/")
+def get_runner() -> SandboxRunnerClient:
+    return SandboxRunnerClient()
 
 
 def get_preview_url(
@@ -44,20 +38,21 @@ def get_preview_url(
 
     Priority:
     1. URL returned by the remote runner
-    2. SANDBOX_RUNNER_URL + /preview/<sandbox_id>/
+    2. RUNNER_PUBLIC_URL + /preview/<sandbox_id>/
     3. None
     """
 
-    # If the runner explicitly returned a preview URL,
-    # use that first.
     if runner_preview_url:
         return runner_preview_url.rstrip("/")
 
-    # Otherwise construct the URL from the configured
-    # remote sandbox runner.
-    if SANDBOX_RUNNER_URL:
+    runner_public_url = os.getenv(
+        "RUNNER_PUBLIC_URL",
+        "",
+    ).rstrip("/")
+
+    if runner_public_url:
         return (
-            f"{SANDBOX_RUNNER_URL}"
+            f"{runner_public_url}"
             f"/preview/"
             f"{sandbox_id}/"
         )
@@ -76,87 +71,60 @@ def launch_repository(
     current_user: User = Depends(get_current_user),
 ):
     sandbox_id = None
-    workspace = None
-    image_name = None
-    container_name = None
 
     try:
         # ------------------------------------------
-        # Create workspace
+        # Create sandbox ID
         # ------------------------------------------
 
-        sandbox_id, workspace = manager.create_workspace()
+        import uuid
+
+        sandbox_id = str(uuid.uuid4())
 
         # ------------------------------------------
-        # Clone repository
+        # Call remote sandbox runner
         # ------------------------------------------
 
-        manager.clone_repository(
-            str(request.url),
-            workspace,
-        )
+        runner = get_runner()
 
-        repo_path = workspace / "repo"
-
-        # ------------------------------------------
-        # Find application
-        # ------------------------------------------
-
-        app_path = manager.find_application(
-            repo_path
+        result = runner.launch(
+            sandbox_id=sandbox_id,
+            repo_url=str(request.url),
+            container_port=3000,
         )
 
         # ------------------------------------------
-        # Dockerfile + container port
+        # Runner response
         # ------------------------------------------
 
-        dockerfile = app_path / "Dockerfile"
-
-        if dockerfile.exists():
-            container_port = (
-                manager.detect_dockerfile_port(
-                    dockerfile
-                )
-            )
-        else:
-            _, container_port = (
-                manager.generate_dockerfile(
-                    app_path
-                )
-            )
-
-        # ------------------------------------------
-        # Build Docker image
-        # ------------------------------------------
-
-        image_name, container_port = (
-            manager.build_image(
-                workspace,
-                sandbox_id,
-            )
+        container_id = result.get(
+            "container_id"
         )
 
-        # ------------------------------------------
-        # Start container
-        # ------------------------------------------
-
-        container = manager.start_container(
-            image_name,
-            sandbox_id,
-            container_port,
-        )
-
-        container_name = container[
+        container_name = result.get(
             "container_name"
-        ]
+        )
 
-        # ------------------------------------------
-        # Runner preview URL
-        # ------------------------------------------
+        image_name = result.get(
+            "image_name"
+        )
+
+        workspace = result.get(
+            "workspace"
+        )
+
+        host_port = result.get(
+            "host_port"
+        )
+
+        container_port = result.get(
+            "container_port",
+            3000,
+        )
 
         preview_url = get_preview_url(
             sandbox_id,
-            container.get("preview_url"),
+            result.get("preview_url"),
         )
 
         # ------------------------------------------
@@ -167,15 +135,11 @@ def launch_repository(
             sandbox_id=sandbox_id,
             user_id=current_user.id,
             repo_url=str(request.url),
-            container_id=container[
-                "container_id"
-            ],
+            container_id=container_id,
             container_name=container_name,
             image_name=image_name,
-            workspace=str(workspace),
-            host_port=container.get(
-                "host_port"
-            ),
+            workspace=workspace,
+            host_port=host_port,
             container_port=container_port,
             status="RUNNING",
         )
@@ -197,29 +161,6 @@ def launch_repository(
         }
 
     except Exception as error:
-
-        # ------------------------------------------
-        # Cleanup
-        # ------------------------------------------
-
-        if (
-            sandbox_id
-            or container_name
-            or workspace
-            or image_name
-        ):
-            manager.delete_sandbox(
-                sandbox_id=sandbox_id or "",
-                container_name=(
-                    container_name or ""
-                ),
-                workspace=workspace,
-                image_name=image_name,
-            )
-
-        # ------------------------------------------
-        # Database rollback
-        # ------------------------------------------
 
         db.rollback()
 
@@ -258,27 +199,21 @@ def get_sandbox(
 
     return {
         "success": True,
-        "sandbox": {
-            "sandbox_id": sandbox.sandbox_id,
-            "repo_url": sandbox.repo_url,
-            "container_id": sandbox.container_id,
-            "container_name": sandbox.container_name,
-            "image_name": sandbox.image_name,
-            "host_port": sandbox.host_port,
-            "container_port": sandbox.container_port,
-            "status": sandbox.status,
-            "created_at": sandbox.created_at,
-        },
+        "sandbox_id": sandbox.sandbox_id,
+        "repo_url": sandbox.repo_url,
+        "container_id": sandbox.container_id,
+        "container_name": sandbox.container_name,
+        "status": sandbox.status,
         "preview_url": preview_url,
     }
 
 
 # ==================================================
-# SANDBOX STATUS
+# STOP
 # ==================================================
 
-@router.get("/{sandbox_id}/status")
-def sandbox_status(
+@router.post("/{sandbox_id}/stop")
+def stop_sandbox(
     sandbox_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -298,138 +233,29 @@ def sandbox_status(
             detail="Sandbox not found",
         )
 
-    status = manager.get_container_status(
-        sandbox.container_name
-    )
+    try:
+        runner = get_runner()
 
-    # ------------------------------------------
-    # Automatic cleanup
-    # ------------------------------------------
-
-    if status in {
-        "STOPPED",
-        "DEAD",
-        "NOT_FOUND",
-    }:
-
-        sandbox.status = status
-        db.commit()
-
-        manager.delete_sandbox(
+        runner.stop(
             sandbox_id=sandbox.sandbox_id,
-            container_name=(
-                sandbox.container_name
-            ),
-            workspace=(
-                Path(sandbox.workspace)
-                if sandbox.workspace
-                else None
-            ),
-            image_name=sandbox.image_name,
+            container_name=sandbox.container_name,
         )
 
-        db.delete(sandbox)
+        sandbox.status = "STOPPED"
+
         db.commit()
 
         return {
             "success": True,
-            "sandbox_id": sandbox_id,
-            "status": status,
-            "cleaned_up": True,
-            "message": (
-                "Sandbox stopped and cleaned up"
-            ),
+            "sandbox_id": sandbox.sandbox_id,
+            "status": sandbox.status,
         }
 
-    # ------------------------------------------
-    # Synchronize status
-    # ------------------------------------------
+    except Exception as error:
 
-    if sandbox.status != status:
+        db.rollback()
 
-        sandbox.status = status
-
-        db.commit()
-        db.refresh(sandbox)
-
-    # ------------------------------------------
-    # Build response
-    # ------------------------------------------
-
-    response = {
-        "success": True,
-        "sandbox_id": sandbox.sandbox_id,
-        "status": status,
-        "container_name": (
-            sandbox.container_name
-        ),
-        "container_id": sandbox.container_id,
-        "cleaned_up": False,
-    }
-
-    # ------------------------------------------
-    # Production preview URL
-    # ------------------------------------------
-
-    runner_url = os.getenv(
-        "SANDBOX_RUNNER_URL",
-        "",
-    ).rstrip("/")
-
-    if runner_url:
-        response["preview_url"] = (
-            f"{runner_url}"
-            f"/preview/"
-            f"{sandbox.sandbox_id}/"
-        )
-
-    return response
-
-
-# ==================================================
-# DELETE SANDBOX
-# ==================================================
-
-@router.delete("/{sandbox_id}")
-def delete_sandbox(
-    sandbox_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    sandbox = (
-        db.query(Sandbox)
-        .filter(
-            Sandbox.sandbox_id == sandbox_id,
-            Sandbox.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not sandbox:
         raise HTTPException(
-            status_code=404,
-            detail="Sandbox not found",
+            status_code=400,
+            detail=str(error),
         )
-
-    manager.delete_sandbox(
-        sandbox_id=sandbox.sandbox_id,
-        container_name=(
-            sandbox.container_name
-            or ""
-        ),
-        workspace=(
-            Path(sandbox.workspace)
-            if sandbox.workspace
-            else None
-        ),
-        image_name=sandbox.image_name,
-    )
-
-    db.delete(sandbox)
-    db.commit()
-
-    return {
-        "success": True,
-        "sandbox_id": sandbox_id,
-        "message": "Sandbox deleted",
-    }
